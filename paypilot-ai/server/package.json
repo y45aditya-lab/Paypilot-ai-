@@ -6,19 +6,31 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "seed": "node src/seed.js/seedProducts.js",
-    "check": "node --check src/server.js && node --check src/app.js && node --check src/config/database.js && node --check src/Controllers/payment.controller.js && node --check src/Service/paypal.service.js && node --check src/models/Payment.js && node --check src/models/Product.js && node --check src/routes/payment.routes.js && node --check src/routes/product.routes.js && node --check src/seed.js"
+    "seed": "node src/seed/seedProduct.js",
+    "promote-admin": "node src/script/promoteAdmin.js",
+    "migrate:organizations": "node src/script/migrateOrganizations.js",
+    "test": "node --test",
+    "check": "node --check src/server.js && node --check src/app.js && node --check src/routes/Order.js && node --check src/routes/Transcation.js && node --check src/routes/analytics.js && node --check src/routes/notifications.js && node --check src/routes/copilot.js && node --check src/routes/recommendations.js && node --check src/routes/admin.js && node --check src/routes/product.routes.js && node --check src/routes/requests.js && node --check src/routes/documents.js && node --check src/routes/subscriptions.js && node --check src/Service/paypal.service.js && node --check src/Service/paypalWebhook.js && node --check src/Service/webhooksHandlers.js && node --check src/Service/recordCapture.js && node --check src/Service/riskAnalysis.js && node --check src/Service/notifications.js && node --check src/Service/provisionOrganization.js && node --check src/Service/renewalReminders.js && node --check src/Service/approvalPolicy.js && node --check src/Service/transactionCopilot.js && node --check src/models/Order.js && node --check src/models/Transaction.js && node --check src/models/PurchaseRequest.js && node --check src/models/PurchaseOrder.js && node --check src/models/Subscription.js && node --check src/models/InvoiceDocument.js && node --check src/models/Organization.js && node --check src/models/OrganizationInvite.js && node --check src/models/DepartmentBudget.js && node --check src/models/Notification.js && node --check src/models/Auditlog.js && node --check src/models/WebhookEvent.js && node --check src/models/Vendor.js && node --check src/models/VendorOffer.js && node --check src/seed/seedProduct.js && node --check src/script/promoteAdmin.js && node --check src/script/migrateOrganizations.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^18.0.7",
     "express": "^5.3.0",
+    "express-rate-limit": "^8.7.1",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.11.1",
-    "openai": "^7.33.0"
+    "multer": "^2.4.0",
+    "nodemailer": "^10.1.2",
+    "openai": "^7.33.0",
+    "pdf-parse": "^2.4.5",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

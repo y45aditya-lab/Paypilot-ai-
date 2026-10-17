@@ -11,7 +11,7 @@ export default function Dashboard() {
     let active = true;
 
     api.get("/health")
-      .then(({ data }) => {
+      .then((data) => {
         if (active) {
           setApiStatus(
             data.status === "ok" || data.success === true

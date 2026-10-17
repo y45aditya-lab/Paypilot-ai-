@@ -1,17 +1,21 @@
-import { useState } from 'react'
-import Navbar from './components/Navbar.jsx'
-import Checkout from './pages/Checkout.jsx'
-import Dashboard from './pages/Dashboard.jsx'
+﻿import Header from './components/Header.jsx';
+import RequireAuth from './components/RequireAuth.jsx';
+import Dashboard from './components/Dashboard.jsx';
+import { AuthProvider } from './context/AuthContext.jsx';
 
 function App() {
-  const [page, setPage] = useState('dashboard')
-
   return (
-    <div className="min-h-screen md:flex">
-      <Navbar currentPage={page} onNavigate={setPage} />
-      {page === 'checkout' ? <Checkout /> : <Dashboard />}
-    </div>
-  )
+    <AuthProvider>
+      <div className="min-h-screen bg-[#090e18] text-slate-100">
+        <Header />
+        <main className="mx-auto max-w-6xl px-4 py-7 sm:px-6 sm:py-10">
+          <RequireAuth>
+            <Dashboard />
+          </RequireAuth>
+        </main>
+      </div>
+    </AuthProvider>
+  );
 }
 
-export default App
+export default App;

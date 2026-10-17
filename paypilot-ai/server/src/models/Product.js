@@ -11,9 +11,9 @@ const productSchema = new mongoose.Schema(
     description: { type: String, required: true },
     features: [String],
 
-    // MONEY RULE: always integer cents. 2999 = $29.99
+    // Money is stored in minor units: 2999 = ₹29.99 for INR catalog entries.
     unitPriceCents: { type: Number, required: true, min: 0, validate: Number.isInteger },
-    currency: { type: String, default: 'USD' },
+    currency: { type: String, default: 'INR' },
     billingPeriod: { type: String, enum: ['month'], default: 'month' },
 
     // per_seat: total = price x seats.  flat: total = price, whatever the seats

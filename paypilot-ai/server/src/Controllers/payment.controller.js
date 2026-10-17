@@ -1,11 +1,13 @@
 import mongoose from "mongoose";
 import Product from "../models/Product.js";
 import Payment from "../models/Payment.js";
+import { computeTotalCents } from "../Service/Pricing.js";
 
 import {
+  centsToPayPalValue,
   createPayPalOrder,
   getPayPalOrder,
-  capturePayPalOrder
+  capturePayPalOrder,
 } from "../Service/paypal.service.js";
 
 export async function createOrder(req, res) {
@@ -31,9 +33,11 @@ export async function createOrder(req, res) {
       });
     }
 
-    const amount = product.price.toFixed(2);
+    const totalCents = computeTotalCents(product, product.minSeats ?? 1);
+    const amount = centsToPayPalValue(totalCents);
 
     payment = await Payment.create({
+      user: req.user.id,
       productId: product._id,
       productName: product.name,
       amount,
@@ -42,9 +46,10 @@ export async function createOrder(req, res) {
     });
 
     const order = await createPayPalOrder({
-      paymentId: payment._id,
-      amount,
-      currency: product.currency
+      orderId: payment._id,
+      totalCents,
+      currency: product.currency,
+      description: product.name,
     });
 
     if (!order.id || order.status !== "CREATED") {
@@ -88,7 +93,8 @@ export async function captureOrder(req, res) {
     }
 
     const payment = await Payment.findOne({
-      paypalOrderId: orderId
+      paypalOrderId: orderId,
+      user: req.user.id,
     });
 
     if (!payment) {
@@ -134,10 +140,7 @@ export async function captureOrder(req, res) {
       });
     }
 
-    const result = await capturePayPalOrder(
-      orderId,
-      payment._id
-    );
+    const result = await capturePayPalOrder({ paypalOrderId: orderId, orderId: payment._id });
 
     const capture = result.purchase_units
       ?.flatMap(unit => unit.payments?.captures || [])
@@ -181,7 +184,7 @@ export async function captureOrder(req, res) {
 
 export async function getTransactions(req, res) {
   try {
-    const transactions = await Payment.find()
+    const transactions = await Payment.find({ user: req.user.id })
       .sort({ createdAt: -1 })
       .select(
         "productName amount currency status paypalCaptureId createdAt"

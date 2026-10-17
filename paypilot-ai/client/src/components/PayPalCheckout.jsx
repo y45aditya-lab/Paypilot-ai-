@@ -1,157 +1,104 @@
-import { useEffect, useRef, useState } from "react";
-import { loadScript } from "@paypal/paypal-js";
-import {
-  createPaymentOrder,
-  capturePaymentOrder,
-} from "../services/api";
+import { useState } from 'react';
+import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
+import { createPaypalOrder, capturePayment, formatMoney, getOrderStatus } from '../services/api.js';
 
-export default function PayPalCheckout({
-  product,
-  onSuccess,
-}) {
-  const buttonContainerRef = useRef(null);
-  const [status, setStatus] = useState("Loading PayPal...");
-  const [error, setError] = useState("");
+export default function Checkout({ order, onPaid, onCancelOrder }) {
+  // 'ready' | 'processing' | 'pending' | 'cancelled' | 'error'
+  const [status, setStatus] = useState('ready');
+  const [message, setMessage] = useState(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    let buttons;
-
-    async function initializePayPal() {
-      try {
-        const clientId =
-          import.meta.env.VITE_PAYPAL_CLIENT_ID;
-
-        if (!clientId) {
-          throw new Error(
-            "PayPal Sandbox Client ID is missing."
-          );
-        }
-
-        const paypal = await loadScript({
-          clientId,
-          currency: product.currency || "USD",
-          intent: "capture",
-        });
-
-        if (cancelled) return;
-
-        if (!paypal?.Buttons) {
-          throw new Error(
-            "PayPal Buttons could not be loaded."
-          );
-        }
-
-        buttons = paypal.Buttons({
-          createOrder: async () => {
-            const result = await createPaymentOrder(
-              product._id
-            );
-
-            if (!result.orderId) {
-              throw new Error(
-                "Backend did not return a PayPal order ID."
-              );
-            }
-
-            return result.orderId;
-          },
-
-          onApprove: async (data) => {
-            setStatus("Verifying payment...");
-            setError("");
-
-            try {
-              const result = await capturePaymentOrder(
-                data.orderID
-              );
-
-              if (!result.success) {
-                throw new Error(
-                  "Payment has not been confirmed."
-                );
-              }
-
-              setStatus("Payment completed.");
-
-              if (onSuccess) {
-                onSuccess(result);
-              }
-            } catch (err) {
-              setStatus("Payment verification required.");
-              setError(
-                err.response?.data?.message ||
-                  err.message ||
-                  "Could not verify the payment."
-              );
-            }
-          },
-
-          onCancel: () => {
-            setStatus("Checkout cancelled.");
-          },
-
-          onError: (err) => {
-            console.error("PayPal checkout error:", err);
-            setStatus("Checkout failed.");
-            setError(
-              "PayPal checkout failed. Check the server and browser console."
-            );
-          },
-        });
-
-        if (cancelled) {
-          await buttons.close();
-          return;
-        }
-
-        await buttons.render(buttonContainerRef.current);
-
-        if (!cancelled) {
-          setStatus("Ready for checkout.");
-        }
-      } catch (err) {
-        console.error("PayPal initialization error:", err);
-
-        if (!cancelled) {
-          setStatus("PayPal unavailable.");
-          setError(err.message || "Could not load PayPal.");
-        }
-      }
-    }
-
-    initializePayPal();
-
-    return () => {
-      cancelled = true;
-      if (buttons) {
-        buttons.close().catch(() => {});
-      }
-    };
-  }, [product._id, product.currency, onSuccess]);
+  const clientId = import.meta.env.VITE_PAYPAL_CLIENT_ID;
 
   return (
-    <section className="mt-5 rounded-xl border p-5">
-      <h3 className="text-lg font-semibold">
-        Checkout: {product.name}
-      </h3>
-
-      <p className="my-2 text-gray-600">
-        Price: {product.currency || "USD"}{" "}
-        {Number(product.price).toFixed(2)}
+    <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <h3 className="font-bold">Checkout</h3>
+      <p className="text-sm text-slate-600">
+        {order.productName} x {order.seats} seats:{' '}
+        <strong>{formatMoney(order.totalCents, order.currency)}</strong>
+      </p>
+      <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-800">
+        PayPal sandbox. Use a sandbox buyer account. No real money moves.
       </p>
 
-      <div ref={buttonContainerRef} />
-
-      <p className="mt-3 text-sm text-gray-600">
-        {status}
-      </p>
-
-      {error && (
-        <p className="mt-2 text-sm text-red-600">
-          {error}
-        </p>
+      {!clientId ? (
+        <p className="text-sm text-red-700">VITE_PAYPAL_CLIENT_ID is not set.</p>
+      ) : status === 'processing' ? (
+        <p className="text-sm text-slate-600">Confirming your payment. Please don't close this page...</p>
+      ) : status === 'pending' ? (
+        <div className="space-y-2 rounded-lg border border-amber-300/15 bg-amber-300/6 p-3">
+          <p className="text-sm text-amber-100">PayPal is still confirming this payment. Don’t submit another payment.</p>
+          <button
+            type="button"
+            onClick={async () => {
+              setStatus('processing');
+              try {
+                const latest = await getOrderStatus(order._id);
+                if (latest.order.status === 'paid') onPaid(latest.order);
+                else if (latest.order.status === 'failed') {
+                  setStatus('error');
+                  setMessage('PayPal could not complete this payment. Contact support if your account was charged.');
+                } else {
+                  setStatus('pending');
+                  setMessage('Payment confirmation is still pending. Check again shortly.');
+                }
+              } catch (err) {
+                setStatus('pending');
+                setMessage(err.message);
+              }
+            }}
+            className="rounded-lg border border-amber-200/20 px-3 py-2 text-xs font-semibold text-amber-100"
+          >
+            Check payment status
+          </button>
+        </div>
+      ) : (
+        <PayPalScriptProvider options={{ clientId, currency: order.currency, intent: 'capture' }}>
+          <PayPalButtons
+            style={{ layout: 'vertical' }}
+            // 1) The server creates the PayPal order and returns only its id
+            createOrder={async () => {
+              setMessage(null);
+              const { paypalOrderId } = await createPaypalOrder(order._id);
+              return paypalOrderId;
+            }}
+            // 2) The buyer approved. Ask the SERVER to capture and verify
+            onApprove={async (_data, actions) => {
+              setStatus('processing');
+              try {
+                const result = await capturePayment(order._id);
+                if (result.pending) {
+                  setStatus('pending');
+                  setMessage(result.message);
+                  return;
+                }
+                onPaid(result.order);
+              } catch (err) {
+                setStatus('error');
+                setMessage(err.message);
+                // Declined card: PayPal lets the buyer pick another method
+                if (err.code === 'INSTRUMENT_DECLINED') return actions.restart();
+              }
+            }}
+            onCancel={() => {
+              setStatus('cancelled');
+              setMessage('Payment cancelled. You have not been charged.');
+            }}
+            onError={(err) => {
+              setStatus('error');
+              setMessage(err?.message || 'Something went wrong with PayPal.');
+            }}
+          />
+        </PayPalScriptProvider>
       )}
-    </section>
+
+      {message && (
+        <p className={`text-sm ${status === 'error' ? 'text-red-700' : 'text-slate-600'}`}>{message}</p>
+      )}
+      {!['processing', 'pending'].includes(status) && (
+        <button onClick={onCancelOrder} className="text-sm text-slate-600 underline">
+          Cancel this order
+        </button>
+      )}
+    </div>
   );
 }

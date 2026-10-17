@@ -2,11 +2,12 @@ import Product from '../models/Product.js';
 import { computeTotalCents } from './Pricing.js';
 
 // This is what the AI is allowed to "see". It reads the DB; it never writes.
-export async function searchCatalog({ category, seats, maxTotalCents }) {
+export async function searchCatalog({ category, seats, maxTotalCents, currency = 'INR' }) {
   const filter = {
     active: true,
     minSeats: { $lte: seats },
     maxSeats: { $gte: seats },
+    currency,
   };
   if (category) filter.category = category;
 

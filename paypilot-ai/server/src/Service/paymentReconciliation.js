@@ -2,7 +2,6 @@ import Order from '../models/Order.js';
 import {
   getPayPalOrder,
   capturePayPalOrder,
-  PayPalError,
   isDefinitivePayPalFailure,
 } from './paypal.service.js';
 import { recordCompletedCapture } from './recordCapture.js';

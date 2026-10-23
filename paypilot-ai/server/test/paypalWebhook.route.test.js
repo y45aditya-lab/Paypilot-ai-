@@ -115,3 +115,32 @@ test('marks handler failures for provider retry and finalizes successful events'
     assert.ok(successRecords.some((record) => record.update?.status === 'processed'));
   });
 });
+
+test('returns retryable response when the processing token no longer owns finalization', async () => {
+  const router = createPayPalWebhookRouter({
+    WebhookEventModel: fakeModel({
+      create: async (record) => record,
+      updateOne: async () => ({ matchedCount: 0 }),
+    }),
+    verifySignature: async () => true,
+    eventHandler: async () => 'processed',
+  });
+  await withServer(router, async (url) => {
+    const response = await fetch(url, { method: 'POST', headers, body: payload({ id: 'WH-STALE' }) });
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { error: 'Processing claim expired; provider may retry' });
+  });
+});
+
+test('returns retryable server error when signature verification is unavailable', async () => {
+  const router = createPayPalWebhookRouter({
+    WebhookEventModel: fakeModel(),
+    verifySignature: async () => { throw new Error('provider verification unavailable'); },
+    eventHandler: async () => assert.fail('handler must not run when verification fails'),
+  });
+  await withServer(router, async (url) => {
+    const response = await fetch(url, { method: 'POST', headers, body: payload({ id: 'WH-VERIFY-ERROR' }) });
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), { error: 'Verification unavailable' });
+  });
+});

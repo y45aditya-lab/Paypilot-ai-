@@ -4,7 +4,7 @@ import {
   getPayPalRefund,
   refundPayPalCapture,
   isDefinitivePayPalRefundFailure,
-  payPalValueToCents,
+  isExactPayPalRefund,
 } from './paypal.service.js';
 import { audit } from './Audit.js';
 import { createNotification } from './notifications.js';
@@ -17,11 +17,7 @@ const MAX_UNKNOWN_ID_ATTEMPTS = 5;
 let running = false;
 
 export function isExactFullRefund(transaction, refund) {
-  const amount = refund?.amount;
-  const cents = amount?.value === undefined ? Number.NaN : payPalValueToCents(amount.value);
-  return Number.isSafeInteger(cents)
-    && cents === transaction.amountCents
-    && amount?.currency_code === transaction.currency;
+  return isExactPayPalRefund(refund, transaction.amountCents, transaction.currency);
 }
 
 async function markNeedsReview(transaction, reason) {

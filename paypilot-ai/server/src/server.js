@@ -2,6 +2,7 @@ import 'dotenv/config';
 import app from './app.js';
 import connectDatabase from './config/database.js';
 import { startRenewalReminderSchedule } from './Service/renewalReminders.js';
+import { startPaymentReconciliationSchedule } from './Service/paymentReconciliation.js';
 
 const jwtSecret = process.env.JWT_SECRET || (process.env.NODE_ENV !== 'production' ? 'dev_jwt_secret_change_me_for_real_projects_123456' : '');
 
@@ -16,6 +17,7 @@ const port = Number(process.env.PORT) || 5000;
 try {
   await connectDatabase();
   startRenewalReminderSchedule();
+  startPaymentReconciliationSchedule();
   app.listen(port, () => {
     console.info(`PayPilot API listening on port ${port}.`);
   });

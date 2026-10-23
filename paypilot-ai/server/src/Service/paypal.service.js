@@ -10,6 +10,19 @@ export class PayPalError extends Error {
   }
 }
 
+// Some failures are definitive provider rejections; others may happen after PayPal
+// accepted the capture (for example, a timeout or a 5xx response). Never reopen
+// an order for a new capture when the outcome is uncertain.
+export function isDefinitivePayPalFailure(error) {
+  if (!(error instanceof PayPalError) || !Number.isInteger(error.status)) return false;
+
+  // Whitelist responses that establish the capture request was rejected. Do not
+  // treat every 4xx as safe: an "already captured" response can mean money moved.
+  if ([401, 403, 404].includes(error.status)) return true;
+  return error.status === 422
+    && ['INSTRUMENT_DECLINED', 'ORDER_NOT_APPROVED'].includes(error.code);
+}
+
 // OAuth: exchange client id + secret for a short-lived access token, cached until near expiry
 let cached = { token: null, expiresAt: 0 };
 

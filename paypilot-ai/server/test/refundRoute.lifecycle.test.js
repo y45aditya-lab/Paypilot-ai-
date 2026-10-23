@@ -124,7 +124,7 @@ test('keeps an ambiguous timeout pending and tells the client not to submit agai
     assert.equal(body.pending, true);
     assert.match(body.message, /Do not submit another refund request/);
     assert.equal(body.transaction.refundStatus, 'pending');
-    assert.equal(providerCalls, 1);
+    assert.equal(counters.providerCalls, 1);
   });
 });
 
@@ -133,7 +133,7 @@ test('does not issue a second provider request while refund is already processin
   await withRoute({
     initial: 'missing',
     existing: transaction,
-  }, async ({ base, providerCalls }) => {
+  }, async ({ base, counters }) => {
     const response = await fetch(base, { method: 'POST' });
     assert.equal(response.status, 202);
     assert.equal((await response.json()).pending, true);
@@ -146,11 +146,11 @@ test('returns the settled state when the transaction is already refunded', async
   await withRoute({
     initial: 'missing',
     existing: transaction,
-  }, async ({ base, providerCalls }) => {
+  }, async ({ base, counters }) => {
     const response = await fetch(base, { method: 'POST' });
     assert.equal(response.status, 200);
     assert.equal((await response.json()).alreadyRefunded, true);
-    assert.equal(providerCalls, 0);
+    assert.equal(counters.providerCalls, 0);
   });
 });
 

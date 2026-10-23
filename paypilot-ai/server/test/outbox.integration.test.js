@@ -23,6 +23,7 @@ test('outbox enqueue, retry, and dead-letter behavior', { skip: !uri }, async (t
       const second = await enqueueOutboxEvent({ eventKey, eventType: 'payment_notification', payload });
       assert.equal(String(first._id), String(second._id));
       assert.equal(await OutboxEvent.countDocuments({ eventKey }), 1);
+      await OutboxEvent.deleteOne({ eventKey }); // Keep later batch-processing tests isolated.
     });
 
     await t.test('failed processing schedules a bounded retry', async () => {

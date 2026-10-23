@@ -13,6 +13,14 @@ export class PayPalError extends Error {
 // Some failures are definitive provider rejections; others may happen after PayPal
 // accepted the capture (for example, a timeout or a 5xx response). Never reopen
 // an order for a new capture when the outcome is uncertain.
+// Refunds need a stricter retry policy than ordinary requests: a timeout or 5xx
+// may occur after PayPal has already issued the refund.
+export function isDefinitivePayPalRefundFailure(error) {
+  if (!(error instanceof PayPalError) || !Number.isInteger(error.status)) return false;
+  return [400, 401, 403, 404].includes(error.status)
+    && !['REFUND_ALREADY_PROCESSED', 'INTERNAL_SERVER_ERROR'].includes(error.code);
+}
+
 export function isDefinitivePayPalFailure(error) {
   if (!(error instanceof PayPalError) || !Number.isInteger(error.status)) return false;
 

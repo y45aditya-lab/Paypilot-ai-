@@ -153,3 +153,36 @@ test('returns the settled state when the transaction is already refunded', async
     assert.equal(providerCalls, 0);
   });
 });
+
+test('scopes refund lookup to the authenticated user and organization', async () => {
+  const observedFilters = [];
+  let providerCalls = 0;
+  const TransactionModel = {
+    findOneAndUpdate: async (filter) => { observedFilters.push(filter); return null; },
+    findOne: async (filter) => { observedFilters.push(filter); return null; },
+    findById: async () => null,
+  };
+  const router = createTransactionRouter({
+    TransactionModel,
+    refundCapture: async () => { providerCalls += 1; return { id: 'SHOULD-NOT-RUN', status: 'COMPLETED' }; },
+    auditEvent: async () => {},
+    notify: async () => {},
+  });
+  const app = express();
+  app.use((req, _res, next) => { req.user = { id: userId, organizationId }; next(); });
+  app.use('/api/transactions', router);
+  const server = createServer(app);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/transactions/${transactionId}/refund`, { method: 'POST' });
+    assert.equal(response.status, 404);
+    assert.equal(providerCalls, 0);
+    assert.equal(observedFilters.length, 2);
+    for (const filter of observedFilters) {
+      assert.equal(String(filter.user), userId);
+      assert.equal(String(filter.organization), organizationId);
+    }
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});

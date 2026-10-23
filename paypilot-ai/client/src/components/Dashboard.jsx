@@ -9,6 +9,7 @@ import TransactionHistory from './TransactionHistory.jsx';
 import InventoryVendors from './InventoryVendors.jsx';
 import PurchaseRequests from './PurchaseRequests.jsx';
 import OrganizationWorkspace from './OrganizationWorkspace.jsx';
+import PaymentRecovery from './PaymentRecovery.jsx';
 import { useAuth } from '../context/useAuth.js';
 
 const TABS = [
@@ -24,7 +25,7 @@ export default function Dashboard() {
   const [tab, setTab] = useState('assistant');
   const { user } = useAuth();
   const tabs = user?.role === 'admin'
-    ? [...TABS, { id: 'inventory', label: 'Vendors & inventory', icon: Store }, { id: 'workspace', label: 'Organization', icon: Cog }]
+    ? [...TABS, { id: 'inventory', label: 'Vendors & inventory', icon: Store }, { id: 'workspace', label: 'Organization', icon: Cog }, { id: 'recovery', label: 'Payment recovery', icon: ReceiptText }]
     : ['finance', 'manager'].includes(user?.role)
       ? [...TABS, { id: 'workspace', label: 'Documents & policy', icon: FileText }]
       : TABS;
@@ -83,6 +84,7 @@ export default function Dashboard() {
           {tab === 'analytics' && <AnalyticsDashboard />}
           {tab === 'inventory' && user?.role === 'admin' && <InventoryVendors />}
           {tab === 'workspace' && ['admin', 'finance', 'manager'].includes(user?.role) && <OrganizationWorkspace />}
+          {tab === 'recovery' && user?.role === 'admin' && <PaymentRecovery />}
         </section>
       </div>
     </div>

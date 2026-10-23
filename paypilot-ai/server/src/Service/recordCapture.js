@@ -115,16 +115,6 @@ export async function recordCompletedCapture(order, capture, source) {
       orderId: order._id,
       meta: { transactionId: String(transaction._id), captureId: capture.id, amountCents },
     });
-    await createNotification({
-      userId: order.user,
-      type: 'payment_completed',
-      title: 'Payment confirmed',
-      message: `${order.productName} · ${order.currency} ${(amountCents / 100).toFixed(2)}.`,
-      orderId: order._id,
-      transactionId: transaction._id,
-      dedupeKey: `payment-completed:${capture.id}`,
-    });
-
     const recent = await Transaction.find({
       organization: order.organization,
       user: order.user,
@@ -153,6 +143,20 @@ export async function recordCompletedCapture(order, capture, source) {
       }
     }
   }
+
+  // Always attempt the idempotent notification, including when a retry finds
+  // an existing capture transaction. This repairs the crash window where the
+  // transaction was committed but the process stopped before notification creation.
+  // Notification.dedupeKey is unique, so replays do not create duplicate rows.
+  await createNotification({
+    userId: order.user,
+    type: 'payment_completed',
+    title: 'Payment confirmed',
+    message: `${order.productName} · ${order.currency} ${(amountCents / 100).toFixed(2)}.`,
+    orderId: order._id,
+    transactionId: transaction._id,
+    dedupeKey: `payment-completed:${capture.id}`,
+  });
 
   const currentStatus = updated.modifiedCount === 1
     ? 'paid'

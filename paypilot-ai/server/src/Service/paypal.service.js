@@ -13,6 +13,14 @@ export class PayPalError extends Error {
 // Some failures are definitive provider rejections; others may happen after PayPal
 // accepted the capture (for example, a timeout or a 5xx response). Never reopen
 // an order for a new capture when the outcome is uncertain.
+// Refunds need a stricter retry policy than ordinary requests: a timeout or 5xx
+// may occur after PayPal has already issued the refund.
+export function isDefinitivePayPalRefundFailure(error) {
+  if (!(error instanceof PayPalError) || !Number.isInteger(error.status)) return false;
+  return [400, 401, 403, 404].includes(error.status)
+    && !['REFUND_ALREADY_PROCESSED', 'INTERNAL_SERVER_ERROR'].includes(error.code);
+}
+
 export function isDefinitivePayPalFailure(error) {
   if (!(error instanceof PayPalError) || !Number.isInteger(error.status)) return false;
 
@@ -87,6 +95,15 @@ export function payPalValueToCents(value) {
   return cents <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(cents) : Number.NaN;
 }
 
+export function isExactPayPalRefund(refund, expectedAmountCents, expectedCurrency) {
+  const amountCents = refund?.amount?.value === undefined
+    ? Number.NaN
+    : payPalValueToCents(refund.amount.value);
+  return Number.isSafeInteger(amountCents)
+    && amountCents === expectedAmountCents
+    && refund?.amount?.currency_code === expectedCurrency;
+}
+
 export function createPayPalOrder({ orderId, totalCents, currency, description }) {
   return paypalRequest('/v2/checkout/orders', {
     requestId: `create-${orderId}`, // one PayPal order per PayPilot order, even on retries
@@ -112,6 +129,10 @@ export function capturePayPalOrder({ paypalOrderId, orderId }) {
   return paypalRequest(`/v2/checkout/orders/${encodeURIComponent(paypalOrderId)}/capture`, {
     requestId: `capture-${orderId}`, // a retry after a network timeout can't double-charge
   });
+}
+
+export function getPayPalRefund(refundId) {
+  return paypalRequest(`/v2/payments/refunds/${encodeURIComponent(refundId)}`, { method: 'GET' });
 }
 
 export function refundPayPalCapture({ captureId, transactionId }) {

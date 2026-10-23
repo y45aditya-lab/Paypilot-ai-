@@ -3,6 +3,7 @@ import Order from '../models/Order.js';
 import Transaction from '../models/Transaction.js';
 import { audit } from './Audit.js';
 import { recordCompletedCapture } from './recordCapture.js';
+import { payPalValueToCents } from './paypal.service.js';
 import { createNotification } from './notifications.js';
 import PurchaseOrder from '../models/PurchaseOrder.js';
 import Subscription from '../models/Subscription.js';
@@ -54,16 +55,24 @@ async function onCaptureCompleted(cap) {
 async function onCaptureDenied(cap) {
   const order = await findOurOrder(cap);
   if (!order) return 'ignored';
-  await Order.updateOne({ _id: order._id, status: { $in: OPEN } }, { status: 'failed' });
-  await audit('webhook.capture_denied', { userId: order.user, orderId: order._id });
+  const failedOrder = await Order.findOneAndUpdate(
+    { _id: order._id, status: { $in: OPEN } },
+    { status: 'failed' },
+    { new: true },
+  );
+  // A late capture-denied event must not emit a failure notification after a
+  // successful capture or another terminal order transition.
+  if (!failedOrder) return 'ignored';
+
+  await audit('webhook.capture_denied', { userId: failedOrder.user, orderId: failedOrder._id });
   await createNotification({
-    userId: order.user,
+    userId: failedOrder.user,
     type: 'payment_failed',
     severity: 'medium',
     title: 'Payment was not completed',
-    message: `${order.productName} payment was declined or denied by PayPal.`,
-    orderId: order._id,
-    dedupeKey: `payment-denied:${order._id}`,
+    message: `${failedOrder.productName} payment was declined or denied by PayPal.`,
+    orderId: failedOrder._id,
+    dedupeKey: `payment-denied:${failedOrder._id}`,
   });
   return 'processed';
 }
@@ -80,27 +89,42 @@ async function onRefundCompleted(resource) {
   const transaction = await Transaction.findOne({ paypalCaptureId: captureId });
   if (!transaction) return 'ignored';
 
+  // Only mark the transaction fully refunded when PayPal explicitly reports the
+  // exact original amount and currency. Missing or malformed amounts must not be
+  // interpreted as a full refund.
   const amountCents = resource.amount?.value === undefined
-    ? transaction.amountCents
-    : Math.round(Number(resource.amount.value) * 100);
+    ? Number.NaN
+    : payPalValueToCents(resource.amount.value);
   if (!Number.isSafeInteger(amountCents) || amountCents !== transaction.amountCents
-    || (resource.amount?.currency_code && resource.amount.currency_code !== transaction.currency)) {
-    await Transaction.updateOne({ _id: transaction._id }, { refundStatus: 'review_required' });
-    await audit('refund.amount_mismatch', {
-      userId: transaction.user,
-      orderId: transaction.order,
-      meta: { transactionId: String(transaction._id), refundId: resource.id },
-    });
-    await createNotification({
-      userId: transaction.user,
-      type: 'refund_review',
-      severity: 'high',
-      title: 'Refund needs review',
-      message: 'A PayPal refund did not match the original charge. Review the transaction before taking further action.',
-      orderId: transaction.order,
-      transactionId: transaction._id,
-      dedupeKey: `refund-review:${transaction._id}`,
-    });
+    || resource.amount?.currency_code !== transaction.currency) {
+    const needsReview = await Transaction.findOneAndUpdate(
+      {
+        _id: transaction._id,
+        status: 'completed',
+        refundStatus: { $in: ['processing', 'pending'] },
+      },
+      { refundStatus: 'review_required' },
+      { new: true },
+    );
+    // A late or duplicate mismatched event must not downgrade a refund that has
+    // already reached a terminal state.
+    if (needsReview) {
+      await audit('refund.amount_mismatch', {
+        userId: needsReview.user,
+        orderId: needsReview.order,
+        meta: { transactionId: String(needsReview._id), refundId: resource.id },
+      });
+      await createNotification({
+        userId: needsReview.user,
+        type: 'refund_review',
+        severity: 'high',
+        title: 'Refund needs review',
+        message: 'A PayPal refund did not match the original charge. Review the transaction before taking further action.',
+        orderId: needsReview.order,
+        transactionId: needsReview._id,
+        dedupeKey: `refund-review:${needsReview._id}`,
+      });
+    }
     return 'processed';
   }
 

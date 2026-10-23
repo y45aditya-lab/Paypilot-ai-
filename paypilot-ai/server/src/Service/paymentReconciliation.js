@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import Order from '../models/Order.js';
 import {
   getPayPalOrder,
@@ -13,7 +14,7 @@ const BATCH_SIZE = 25;
 
 let running = false;
 
-function completedCapture(paypalOrder) {
+export function completedCapture(paypalOrder) {
   const units = Array.isArray(paypalOrder?.purchase_units) ? paypalOrder.purchase_units : [];
   for (const unit of units) {
     const captures = unit?.payments?.captures;
@@ -69,10 +70,14 @@ async function reconcileOne(order) {
 
     // Pending/unknown provider states remain capturing. A later run or verified
     // PayPal webhook can resolve the order; never infer failure from missing data.
+  } catch (error) {
+    // A single malformed provider response or database failure must not stop the
+    // whole batch; the lease is released below so a later run can retry.
+    console.error('[payment-reconciliation] Order reconciliation failed:', String(order._id), error?.message || 'unknown error');
   } finally {
     await Order.updateOne(
-      { _id: order._id },
-      { $unset: { reconciliationLeaseUntil: 1 } },
+      { _id: order._id, reconciliationLeaseToken: order.reconciliationLeaseToken },
+      { $unset: { reconciliationLeaseUntil: 1, reconciliationLeaseToken: 1 } },
     ).catch((error) => {
       console.error('[payment-reconciliation] Could not release lease:', error.message);
     });
@@ -90,6 +95,7 @@ export async function reconcileStalePayments() {
     const leaseUntil = new Date(now.getTime() + LEASE_MS);
 
     while (checked < BATCH_SIZE) {
+      const leaseToken = randomUUID();
       const order = await Order.findOneAndUpdate(
         {
           status: 'capturing',
@@ -101,7 +107,7 @@ export async function reconcileStalePayments() {
           ],
         },
         {
-          $set: { reconciliationLeaseUntil: leaseUntil },
+          $set: { reconciliationLeaseUntil: leaseUntil, reconciliationLeaseToken: leaseToken },
           $inc: { reconciliationAttempts: 1 },
         },
         { new: true, sort: { updatedAt: 1 } },

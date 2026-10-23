@@ -6,6 +6,7 @@ const webhookEventSchema = new mongoose.Schema(
     eventId: { type: String, required: true, unique: true },
     eventType: String,
     status: { type: String, enum: ['processing', 'processed', 'ignored', 'failed'], default: 'processing' },
+    processingToken: { type: String, default: null },
     error: String,
   },
   { timestamps: true },

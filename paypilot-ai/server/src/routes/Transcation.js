@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 import Transaction from '../models/Transaction.js';
 import AuditLog from '../models/Auditlog.js';
 import { audit } from '../Service/Audit.js';
-import { refundPayPalCapture, PayPalError, isDefinitivePayPalRefundFailure } from '../Service/paypal.service.js';
+import { refundPayPalCapture, PayPalError, isDefinitivePayPalRefundFailure, payPalValueToCents } from '../Service/paypal.service.js';
 import { createNotification } from '../Service/notifications.js';
 import Order from '../models/Order.js';
 import Subscription from '../models/Subscription.js';
@@ -70,10 +70,23 @@ router.post('/:id/refund', async (req, res, next) => {
         transactionId: transaction._id,
       });
       if (result.status === 'COMPLETED') {
-        transaction.status = 'refunded';
-        transaction.refundStatus = 'completed';
+        const refundCents = result.amount?.value === undefined
+          ? Number.NaN
+          : payPalValueToCents(result.amount.value);
+        const exactFullRefund = Number.isSafeInteger(refundCents)
+          && refundCents === transaction.amountCents
+          && result.amount?.currency_code === transaction.currency;
+
         transaction.refundId = result.id;
-        transaction.refundedAt = new Date();
+        if (exactFullRefund) {
+          transaction.status = 'refunded';
+          transaction.refundStatus = 'completed';
+          transaction.refundedAt = new Date();
+        } else {
+          // Provider says completed, but the amount cannot be reconciled safely.
+          // Do not report a full refund or allow another refund attempt.
+          transaction.refundStatus = 'review_required';
+        }
       } else if (result.status === 'PENDING') {
         transaction.refundStatus = 'pending';
         transaction.refundId = result.id;

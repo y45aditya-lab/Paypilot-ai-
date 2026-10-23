@@ -61,13 +61,25 @@ router.post('/', async (req, res) => {
       if (!claimed) return res.status(503).json({ error: 'Event retry is already in progress' });
     }
 
-    // 3) PROCESS
+    // 3) PROCESS. Refresh updatedAt while this owner is alive so a legitimate
+    // long-running handler is not mistaken for a crashed worker and reclaimed.
+    const heartbeat = setInterval(() => {
+      void WebhookEvent.updateOne(
+        { eventId: event.id, status: 'processing', processingToken },
+        { $set: { updatedAt: new Date() } },
+      ).catch((err) => console.error('[webhook] lease heartbeat failed:', err.message));
+    }, 2 * 60 * 1000);
+    heartbeat.unref?.();
     try {
       const outcome = await handleEvent(event);
-      await WebhookEvent.updateOne(
+      const finalized = await WebhookEvent.updateOne(
         { eventId: event.id, status: 'processing', processingToken },
         { status: outcome === 'ignored' ? 'ignored' : 'processed', processingToken: null },
       );
+      if (!finalized.matchedCount) {
+        console.error('[webhook] processing claim was lost before finalization:', event.id);
+        return res.status(503).json({ error: 'Processing claim expired; provider may retry' });
+      }
       return res.json({ received: true });
     } catch (err) {
       await WebhookEvent.updateOne(
@@ -76,6 +88,8 @@ router.post('/', async (req, res) => {
       );
       console.error('[webhook] processing failed:', err);
       return res.status(500).json({ error: 'Processing failed' }); // PayPal will retry
+    } finally {
+      clearInterval(heartbeat);
     }
   } catch (err) {
     console.error('[webhook] error:', err);

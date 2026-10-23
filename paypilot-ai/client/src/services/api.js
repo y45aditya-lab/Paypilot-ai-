@@ -147,6 +147,10 @@ export const getNotifications = () => apiFetch('/notifications');
 export const markNotificationRead = (notificationId) =>
   apiFetch(`/notifications/${encodeURIComponent(notificationId)}/read`, { method: 'PATCH' });
 
+export const getDeadOutboxEvents = () => apiFetch('/admin/outbox/dead');
+export const retryDeadOutboxEvent = (eventId) =>
+  apiFetch(`/admin/outbox/${encodeURIComponent(eventId)}/retry`, { method: 'POST' });
+
 export const getAdminProducts = () => apiFetch('/admin/products');
 export const getVendors = () => apiFetch('/admin/vendors');
 export const createVendor = (body) => apiFetch('/admin/vendors', { method: 'POST', body });

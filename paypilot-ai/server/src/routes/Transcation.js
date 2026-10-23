@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 import Transaction from '../models/Transaction.js';
 import AuditLog from '../models/Auditlog.js';
 import { audit } from '../Service/Audit.js';
-import { refundPayPalCapture, PayPalError } from '../Service/paypal.service.js';
+import { refundPayPalCapture, PayPalError, isDefinitivePayPalRefundFailure } from '../Service/paypal.service.js';
 import { createNotification } from '../Service/notifications.js';
 import Order from '../models/Order.js';
 import Subscription from '../models/Subscription.js';
@@ -99,18 +99,36 @@ router.post('/:id/refund', async (req, res, next) => {
         }
       }
     } catch (error) {
-      transaction.refundStatus = 'failed';
+      const definitiveFailure = isDefinitivePayPalRefundFailure(error);
+
+      // A timeout, network failure, rate limit, conflict, or provider 5xx does not
+      // prove the refund failed. Keep it pending until PayPal confirms the outcome.
+      transaction.refundStatus = definitiveFailure ? 'failed' : 'pending';
       await transaction.save();
-      await audit('refund.request_failed', {
+      await audit(definitiveFailure ? 'refund.request_failed' : 'refund.outcome_uncertain', {
         userId: transaction.user,
         orderId: transaction.order,
-        meta: { transactionId: String(transaction._id), providerCode: error.code },
+        meta: { transactionId: String(transaction._id), providerCode: error?.code },
       });
+
       if (error instanceof PayPalError) {
         console.error('[paypal refund]', error.code, error.debugId);
-        return res.status(502).json({ error: 'PayPal could not complete the refund. You can safely retry.' });
+      } else {
+        console.error('[paypal refund] outcome unknown:', error?.message || 'unknown error');
       }
-      throw error;
+
+      if (!definitiveFailure) {
+        return res.status(202).json({
+          transaction: publicTransaction(transaction),
+          pending: true,
+          message: 'PayPal has not confirmed the refund outcome. Do not submit another refund request; status is awaiting confirmation.',
+        });
+      }
+
+      return res.status(502).json({
+        transaction: publicTransaction(transaction),
+        error: 'PayPal rejected the refund request. Check the transaction status before trying again.',
+      });
     }
 
     await audit('refund.requested', {

@@ -69,7 +69,7 @@ async function withRoute({ initial, refundResult, refundError, settled, failureS
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}/api/transactions/${transactionId}/refund`;
   try {
-    await run({ base, get providerCalls() { return providerCalls; }, get updateCalls() { return updateCalls; }, audits, notifications });
+    await run({ base, counters: { get providerCalls() { return providerCalls; }, get updateCalls() { return updateCalls; } }, audits, notifications });
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -81,14 +81,14 @@ test('records an exact completed full refund as refunded', async () => {
     initial: transaction,
     refundResult: { id: 'REFUND-123', status: 'COMPLETED', amount: { value: '12.34', currency_code: 'USD' } },
     settled: { ...transaction, status: 'refunded', refundStatus: 'completed', refundId: 'REFUND-123' },
-  }, async ({ base, providerCalls, notifications }) => {
+  }, async ({ base, counters, notifications }) => {
     const response = await fetch(base, { method: 'POST' });
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.transaction.status, 'refunded');
     assert.equal(body.transaction.refundStatus, 'completed');
     assert.equal(body.transaction.refundId, 'REFUND-123');
-    assert.equal(providerCalls, 1);
+    assert.equal(counters.providerCalls, 1);
     assert.equal(notifications.length, 1);
   });
 });
@@ -117,7 +117,7 @@ test('keeps an ambiguous timeout pending and tells the client not to submit agai
     initial: transaction,
     refundError: new Error('socket timeout after request'),
     failureState: { ...transaction, refundStatus: 'pending' },
-  }, async ({ base, providerCalls }) => {
+  }, async ({ base, counters }) => {
     const response = await fetch(base, { method: 'POST' });
     assert.equal(response.status, 202);
     const body = await response.json();
@@ -137,7 +137,7 @@ test('does not issue a second provider request while refund is already processin
     const response = await fetch(base, { method: 'POST' });
     assert.equal(response.status, 202);
     assert.equal((await response.json()).pending, true);
-    assert.equal(providerCalls, 0);
+    assert.equal(counters.providerCalls, 0);
   });
 });
 

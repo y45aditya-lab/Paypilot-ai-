@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 import Transaction from '../models/Transaction.js';
 import AuditLog from '../models/Auditlog.js';
 import { audit } from '../Service/Audit.js';
-import { refundPayPalCapture, PayPalError, isDefinitivePayPalRefundFailure, payPalValueToCents } from '../Service/paypal.service.js';
+import { refundPayPalCapture, PayPalError, isDefinitivePayPalRefundFailure, isExactPayPalRefund } from '../Service/paypal.service.js';
 import { createNotification } from '../Service/notifications.js';
 import Order from '../models/Order.js';
 import Subscription from '../models/Subscription.js';
@@ -70,12 +70,7 @@ router.post('/:id/refund', async (req, res, next) => {
         transactionId: transaction._id,
       });
       if (result.status === 'COMPLETED') {
-        const refundCents = result.amount?.value === undefined
-          ? Number.NaN
-          : payPalValueToCents(result.amount.value);
-        const exactFullRefund = Number.isSafeInteger(refundCents)
-          && refundCents === transaction.amountCents
-          && result.amount?.currency_code === transaction.currency;
+        const exactFullRefund = isExactPayPalRefund(result, transaction.amountCents, transaction.currency);
 
         transaction.refundId = result.id;
         if (exactFullRefund) {

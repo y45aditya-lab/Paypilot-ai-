@@ -70,6 +70,10 @@ async function reconcileOne(order) {
 
     // Pending/unknown provider states remain capturing. A later run or verified
     // PayPal webhook can resolve the order; never infer failure from missing data.
+  } catch (error) {
+    // A single malformed provider response or database failure must not stop the
+    // whole batch; the lease is released below so a later run can retry.
+    console.error('[payment-reconciliation] Order reconciliation failed:', String(order._id), error?.message || 'unknown error');
   } finally {
     await Order.updateOne(
       { _id: order._id, reconciliationLeaseToken: order.reconciliationLeaseToken },

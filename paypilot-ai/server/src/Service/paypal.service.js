@@ -95,6 +95,15 @@ export function payPalValueToCents(value) {
   return cents <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(cents) : Number.NaN;
 }
 
+export function isExactPayPalRefund(refund, expectedAmountCents, expectedCurrency) {
+  const amountCents = refund?.amount?.value === undefined
+    ? Number.NaN
+    : payPalValueToCents(refund.amount.value);
+  return Number.isSafeInteger(amountCents)
+    && amountCents === expectedAmountCents
+    && refund?.amount?.currency_code === expectedCurrency;
+}
+
 export function createPayPalOrder({ orderId, totalCents, currency, description }) {
   return paypalRequest('/v2/checkout/orders', {
     requestId: `create-${orderId}`, // one PayPal order per PayPilot order, even on retries

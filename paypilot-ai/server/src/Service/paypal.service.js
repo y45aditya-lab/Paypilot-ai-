@@ -122,6 +122,10 @@ export function capturePayPalOrder({ paypalOrderId, orderId }) {
   });
 }
 
+export function getPayPalRefund(refundId) {
+  return paypalRequest(`/v2/payments/refunds/${encodeURIComponent(refundId)}`, { method: 'GET' });
+}
+
 export function refundPayPalCapture({ captureId, transactionId }) {
   return paypalRequest(`/v2/payments/captures/${encodeURIComponent(captureId)}/refund`, {
     requestId: `refund-${transactionId}`,

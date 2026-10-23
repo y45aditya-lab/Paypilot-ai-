@@ -26,11 +26,18 @@ export function completedCapture(paypalOrder) {
   return null;
 }
 
-async function reconcileOne(order) {
+export async function reconcileOne(order, dependencies = {}) {
+  const {
+    getPayPalOrder: lookupPayPalOrder = getPayPalOrder,
+    capturePayPalOrder: captureOrder = capturePayPalOrder,
+    isDefinitivePayPalFailure: isDefinitiveFailure = isDefinitivePayPalFailure,
+    recordCompletedCapture: recordCapture = recordCompletedCapture,
+  } = dependencies;
+
   try {
     let providerOrder;
     try {
-      providerOrder = await getPayPalOrder(order.paypalOrderId);
+      providerOrder = await lookupPayPalOrder(order.paypalOrderId);
     } catch (error) {
       console.error('[payment-reconciliation] PayPal order lookup failed:', error?.message || 'unknown error');
       return;
@@ -42,13 +49,13 @@ async function reconcileOne(order) {
     // the same stable PayPal-Request-Id. This avoids a second logical capture.
     if (!capture && providerOrder.status === 'APPROVED') {
       try {
-        const result = await capturePayPalOrder({
+        const result = await captureOrder({
           paypalOrderId: order.paypalOrderId,
           orderId: order._id,
         });
         capture = completedCapture(result);
       } catch (error) {
-        if (isDefinitivePayPalFailure(error)) {
+        if (isDefinitiveFailure(error)) {
           await Order.updateOne(
             { _id: order._id, status: 'capturing' },
             { status: 'payment_created' },
@@ -61,7 +68,7 @@ async function reconcileOne(order) {
     }
 
     if (capture) {
-      const result = await recordCompletedCapture(order, capture, 'reconciliation');
+      const result = await recordCapture(order, capture, 'reconciliation');
       if (!result.ok) {
         console.warn('[payment-reconciliation] Capture requires manual review:', String(order._id));
       }

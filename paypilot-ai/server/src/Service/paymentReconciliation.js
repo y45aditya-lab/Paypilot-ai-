@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import Order from '../models/Order.js';
 import {
   getPayPalOrder,
@@ -71,8 +72,8 @@ async function reconcileOne(order) {
     // PayPal webhook can resolve the order; never infer failure from missing data.
   } finally {
     await Order.updateOne(
-      { _id: order._id },
-      { $unset: { reconciliationLeaseUntil: 1 } },
+      { _id: order._id, reconciliationLeaseToken: order.reconciliationLeaseToken },
+      { $unset: { reconciliationLeaseUntil: 1, reconciliationLeaseToken: 1 } },
     ).catch((error) => {
       console.error('[payment-reconciliation] Could not release lease:', error.message);
     });
@@ -90,6 +91,7 @@ export async function reconcileStalePayments() {
     const leaseUntil = new Date(now.getTime() + LEASE_MS);
 
     while (checked < BATCH_SIZE) {
+      const leaseToken = randomUUID();
       const order = await Order.findOneAndUpdate(
         {
           status: 'capturing',
@@ -101,7 +103,7 @@ export async function reconcileStalePayments() {
           ],
         },
         {
-          $set: { reconciliationLeaseUntil: leaseUntil },
+          $set: { reconciliationLeaseUntil: leaseUntil, reconciliationLeaseToken: leaseToken },
           $inc: { reconciliationAttempts: 1 },
         },
         { new: true, sort: { updatedAt: 1 } },

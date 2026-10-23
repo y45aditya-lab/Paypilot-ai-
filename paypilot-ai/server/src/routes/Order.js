@@ -4,7 +4,7 @@ import Order from '../models/Order.js';
 import { audit } from '../Service/Audit.js';
 import { recordCompletedCapture } from '../Service/recordCapture.js';
 import {
-  createPayPalOrder, capturePayPalOrder, PayPalError,
+  createPayPalOrder, capturePayPalOrder, PayPalError, isDefinitivePayPalFailure,
 } from '../Service/paypal.service.js';
 import { assessCaptureAttemptRisk } from '../Service/riskAnalysis.js';
 import { createNotification } from '../Service/notifications.js';
@@ -151,18 +151,38 @@ router.post('/:id/capture', async (req, res, next) => {
     try {
       capture = await capturePayPalOrder({ paypalOrderId: order.paypalOrderId, orderId: order._id });
     } catch (err) {
-      // Release the lock so the buyer can retry. A retry reuses the same
-      // PayPal-Request-Id, so it can never charge twice.
-      await Order.updateOne({ _id: order._id }, { status: 'payment_created' });
+      const definitiveFailure = isDefinitivePayPalFailure(err);
+
+      // Only reopen checkout when PayPal definitively rejected the request. A
+      // timeout, network error, rate limit, conflict, or provider 5xx is ambiguous:
+      // PayPal may have captured the money even though we did not receive the result.
+      if (definitiveFailure) {
+        await Order.updateOne(
+          { _id: order._id, status: 'capturing' },
+          { status: 'payment_created' },
+        );
+      }
+
       if (err instanceof PayPalError) {
         console.error('[paypal capture]', err.code, err.debugId);
+        if (!definitiveFailure) {
+          return res.status(202).json({
+            pending: true,
+            message: 'PayPal could not confirm the capture outcome. Do not retry checkout; payment status is awaiting confirmation.',
+          });
+        }
         const code = err.code === 'INSTRUMENT_DECLINED' ? 'INSTRUMENT_DECLINED' : undefined;
         return res.status(err.status === 422 ? 402 : 502).json({
           error: code ? 'Your payment method was declined. Please try again.' : 'Payment could not be completed.',
           code,
         });
       }
-      throw err;
+
+      console.error('[paypal capture] outcome unknown:', err?.message || 'Unknown error');
+      return res.status(202).json({
+        pending: true,
+        message: 'Payment status is awaiting confirmation. Do not retry checkout or create another order.',
+      });
     }
 
     const cap = capture.purchase_units?.[0]?.payments?.captures?.[0];

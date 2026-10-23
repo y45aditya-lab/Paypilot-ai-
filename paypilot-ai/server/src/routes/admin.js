@@ -9,6 +9,7 @@ import Organization from '../models/Organization.js';
 import OrganizationInvite from '../models/OrganizationInvite.js';
 import DepartmentBudget from '../models/DepartmentBudget.js';
 import User from '../models/User.js';
+import OutboxEvent from '../models/OutboxEvent.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { validate } from '../middleware/validate.js';
 import { audit } from '../Service/Audit.js';
@@ -347,6 +348,75 @@ router.get('/review', async (req, res, next) => {
       .sort({ createdAt: -1 }).limit(50).lean();
     res.json({ items });
   } catch (err) { next(err); }
+});
+
+// Dead-letter outbox events are visible only to admins in the same organization.
+// Payloads and processing ownership tokens are intentionally never returned.
+router.get('/outbox/dead', async (req, res, next) => {
+  try {
+    const events = await OutboxEvent.find({
+      status: 'dead',
+      'payload.organizationId': String(req.user.organizationId),
+    }).sort({ updatedAt: -1 }).limit(100).lean();
+
+    res.json({
+      events: events.map((event) => ({
+        id: String(event._id),
+        eventType: event.eventType,
+        status: event.status,
+        attempts: event.attempts,
+        lastError: event.lastError ?? null,
+        createdAt: event.createdAt,
+        updatedAt: event.updatedAt,
+        orderId: event.payload?.orderId ? String(event.payload.orderId) : null,
+      })),
+    });
+  } catch (error) { next(error); }
+});
+
+router.post('/outbox/:id/retry', async (req, res, next) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(404).json({ error: 'Outbox event not found.' });
+    }
+    const event = await OutboxEvent.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        status: 'dead',
+        'payload.organizationId': String(req.user.organizationId),
+      },
+      {
+        $set: {
+          status: 'pending',
+          attempts: 0,
+          availableAt: new Date(),
+          processingToken: null,
+          lastError: null,
+        },
+        $unset: { processedAt: 1 },
+        $inc: { manualRetries: 1 },
+      },
+      { new: true },
+    ).select('_id eventType status attempts manualRetries');
+
+    if (!event) return res.status(404).json({ error: 'Dead outbox event not found.' });
+
+    await audit('outbox.dead_event_retried', {
+      userId: req.user.id,
+      organizationId: req.user.organizationId,
+      meta: { eventId: String(event._id), eventType: event.eventType, manualRetries: event.manualRetries },
+    });
+    res.json({
+      message: 'Outbox event queued for retry.',
+      event: {
+        id: String(event._id),
+        eventType: event.eventType,
+        status: event.status,
+        attempts: event.attempts,
+        manualRetries: event.manualRetries,
+      },
+    });
+  } catch (error) { next(error); }
 });
 
 export default router;

@@ -3,6 +3,7 @@ import app from './app.js';
 import connectDatabase from './config/database.js';
 import { startRenewalReminderSchedule } from './Service/renewalReminders.js';
 import { startPaymentReconciliationSchedule } from './Service/paymentReconciliation.js';
+import { startRefundReconciliationSchedule } from './Service/refundReconciliation.js';
 
 const jwtSecret = process.env.JWT_SECRET || (process.env.NODE_ENV !== 'production' ? 'dev_jwt_secret_change_me_for_real_projects_123456' : '');
 
@@ -18,6 +19,7 @@ try {
   await connectDatabase();
   startRenewalReminderSchedule();
   startPaymentReconciliationSchedule();
+  startRefundReconciliationSchedule();
   app.listen(port, () => {
     console.info(`PayPilot API listening on port ${port}.`);
   });

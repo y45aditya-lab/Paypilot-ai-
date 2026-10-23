@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { randomUUID } from 'node:crypto';
 import WebhookEvent from '../models/WebhookEvent.js';
 import { verifyWebhookSignature } from './paypal.service.js';
 import { handleEvent } from './webhooksHandlers.js';
@@ -30,10 +31,13 @@ router.post('/', async (req, res) => {
   if (typeof event.id !== 'string' || !event.id) return res.status(400).json({ error: 'Missing event id' });
 
   try {
+    // Each claim gets a unique token. A stale worker must not finalize an event
+    // after another delivery has reclaimed it.
+    const processingToken = randomUUID();
     // Claim each provider event atomically. Concurrent deliveries are retried
     // rather than acknowledged before the first handler has finished.
     try {
-      await WebhookEvent.create({ eventId: event.id, eventType: event.event_type, status: 'processing' });
+      await WebhookEvent.create({ eventId: event.id, eventType: event.event_type, status: 'processing', processingToken });
     } catch (err) {
       if (err.code !== 11000) throw err;
       let existing = await WebhookEvent.findOne({ eventId: event.id }).lean();
@@ -51,7 +55,7 @@ router.post('/', async (req, res) => {
       }
       const claimed = await WebhookEvent.findOneAndUpdate(
         { eventId: event.id, status: 'failed' },
-        { status: 'processing', error: null },
+        { status: 'processing', error: null, processingToken },
         { new: true },
       );
       if (!claimed) return res.status(503).json({ error: 'Event retry is already in progress' });
@@ -61,14 +65,14 @@ router.post('/', async (req, res) => {
     try {
       const outcome = await handleEvent(event);
       await WebhookEvent.updateOne(
-        { eventId: event.id },
-        { status: outcome === 'ignored' ? 'ignored' : 'processed' },
+        { eventId: event.id, status: 'processing', processingToken },
+        { status: outcome === 'ignored' ? 'ignored' : 'processed', processingToken: null },
       );
       return res.json({ received: true });
     } catch (err) {
       await WebhookEvent.updateOne(
-        { eventId: event.id },
-        { status: 'failed', error: String(err.message).slice(0, 200) },
+        { eventId: event.id, status: 'processing', processingToken },
+        { status: 'failed', error: String(err.message).slice(0, 200), processingToken: null },
       );
       console.error('[webhook] processing failed:', err);
       return res.status(500).json({ error: 'Processing failed' }); // PayPal will retry

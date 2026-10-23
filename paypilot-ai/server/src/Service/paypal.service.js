@@ -15,8 +15,12 @@ export class PayPalError extends Error {
 // an order for a new capture when the outcome is uncertain.
 export function isDefinitivePayPalFailure(error) {
   if (!(error instanceof PayPalError) || !Number.isInteger(error.status)) return false;
-  if (error.status < 400 || error.status >= 500) return false;
-  return ![408, 409, 425, 429].includes(error.status);
+
+  // Whitelist responses that establish the capture request was rejected. Do not
+  // treat every 4xx as safe: an "already captured" response can mean money moved.
+  if ([401, 403, 404].includes(error.status)) return true;
+  return error.status === 422
+    && ['INSTRUMENT_DECLINED', 'ORDER_NOT_APPROVED'].includes(error.code);
 }
 
 // OAuth: exchange client id + secret for a short-lived access token, cached until near expiry

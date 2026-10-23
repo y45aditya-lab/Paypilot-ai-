@@ -31,6 +31,44 @@ test('MongoDB webhook event claims are unique and atomically reclaimable', { ski
       const saved = await WebhookEvent.findOne({ eventId: reclaimId }).lean();
       assert.ok(['worker-a', 'worker-b'].includes(saved.processingToken));
     });
+
+    await t.test('an expired claim can be reclaimed, but its old owner cannot finalize', async () => {
+      const staleId = `${prefix}-stale`;
+      const oldOwner = 'expired-owner';
+      const newOwner = 'replacement-owner';
+      await WebhookEvent.create({
+        eventId: staleId,
+        status: 'processing',
+        processingToken: oldOwner,
+      });
+      await WebhookEvent.updateOne(
+        { eventId: staleId },
+        { $set: { updatedAt: new Date(Date.now() - 11 * 60 * 1000) } },
+        { timestamps: false },
+      );
+      const staleBefore = new Date(Date.now() - 10 * 60 * 1000);
+      const recovered = await WebhookEvent.findOneAndUpdate(
+        { eventId: staleId, status: 'processing', updatedAt: { $lt: staleBefore } },
+        { $set: { status: 'failed', error: 'Recovered stale processing claim' } },
+        { new: true },
+      );
+      assert.ok(recovered);
+      const reclaimed = await WebhookEvent.findOneAndUpdate(
+        { eventId: staleId, status: 'failed' },
+        { $set: { status: 'processing', processingToken: newOwner, error: null } },
+        { new: true },
+      );
+      assert.equal(reclaimed.processingToken, newOwner);
+      const staleFinalize = await WebhookEvent.updateOne(
+        { eventId: staleId, status: 'processing', processingToken: oldOwner },
+        { $set: { status: 'processed', processingToken: null } },
+      );
+      assert.equal(staleFinalize.matchedCount, 0);
+      const current = await WebhookEvent.findOne({ eventId: staleId }).lean();
+      assert.equal(current.status, 'processing');
+      assert.equal(current.processingToken, newOwner);
+      await WebhookEvent.deleteOne({ eventId: staleId });
+    });
   } finally {
     await WebhookEvent.deleteMany({ eventId: { $in: [eventId, reclaimId] } });
     await mongoose.disconnect();

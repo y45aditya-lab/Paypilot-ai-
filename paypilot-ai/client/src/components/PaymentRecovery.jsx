@@ -31,7 +31,20 @@ export default function PaymentRecovery() {
     }
   }, []);
 
-  useEffect(() => { void loadEvents(); }, [loadEvents]);
+  useEffect(() => {
+    let cancelled = false;
+    getDeadOutboxEvents()
+      .then((response) => {
+        if (!cancelled) setEvents(Array.isArray(response?.events) ? response.events : []);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message || 'Could not load failed payment events.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   async function retryEvent(event) {
     const confirmed = window.confirm(

@@ -3,6 +3,7 @@ import Order from '../models/Order.js';
 import Transaction from '../models/Transaction.js';
 import { audit } from './Audit.js';
 import { recordCompletedCapture } from './recordCapture.js';
+import { payPalValueToCents } from './paypal.service.js';
 import { createNotification } from './notifications.js';
 import PurchaseOrder from '../models/PurchaseOrder.js';
 import Subscription from '../models/Subscription.js';
@@ -80,11 +81,14 @@ async function onRefundCompleted(resource) {
   const transaction = await Transaction.findOne({ paypalCaptureId: captureId });
   if (!transaction) return 'ignored';
 
+  // Only mark the transaction fully refunded when PayPal explicitly reports the
+  // exact original amount and currency. Missing or malformed amounts must not be
+  // interpreted as a full refund.
   const amountCents = resource.amount?.value === undefined
-    ? transaction.amountCents
-    : Math.round(Number(resource.amount.value) * 100);
+    ? Number.NaN
+    : payPalValueToCents(resource.amount.value);
   if (!Number.isSafeInteger(amountCents) || amountCents !== transaction.amountCents
-    || (resource.amount?.currency_code && resource.amount.currency_code !== transaction.currency)) {
+    || resource.amount?.currency_code !== transaction.currency) {
     await Transaction.updateOne({ _id: transaction._id }, { refundStatus: 'review_required' });
     await audit('refund.amount_mismatch', {
       userId: transaction.user,

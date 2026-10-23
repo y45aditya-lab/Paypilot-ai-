@@ -19,6 +19,7 @@ const orderSchema = new mongoose.Schema(
     captureAttempts: { type: Number, required: true, default: 0, min: 0 },
     reconciliationAttempts: { type: Number, required: true, default: 0, min: 0 },
     reconciliationLeaseUntil: { type: Date, index: true },
+    reconciliationLeaseToken: { type: String },
 
     status: {
   type: String,

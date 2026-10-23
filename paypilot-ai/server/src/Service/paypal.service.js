@@ -10,6 +10,15 @@ export class PayPalError extends Error {
   }
 }
 
+// Some failures are definitive provider rejections; others may happen after PayPal
+// accepted the capture (for example, a timeout or a 5xx response). Never reopen
+// an order for a new capture when the outcome is uncertain.
+export function isDefinitivePayPalFailure(error) {
+  if (!(error instanceof PayPalError) || !Number.isInteger(error.status)) return false;
+  if (error.status < 400 || error.status >= 500) return false;
+  return ![408, 409, 425, 429].includes(error.status);
+}
+
 // OAuth: exchange client id + secret for a short-lived access token, cached until near expiry
 let cached = { token: null, expiresAt: 0 };
 

@@ -3,6 +3,7 @@ import Order from '../models/Order.js';
 import { payPalValueToCents } from './paypal.service.js';
 import { audit } from './Audit.js';
 import { createNotification } from './notifications.js';
+import { enqueueOutboxEvent } from './outbox.js';
 import { assessTransactionRisk } from './riskAnalysis.js';
 import PurchaseRequest from '../models/PurchaseRequest.js';
 import PurchaseOrder from '../models/PurchaseOrder.js';
@@ -144,20 +145,22 @@ export async function recordCompletedCapture(order, capture, source) {
     }
   }
 
-  // Always attempt the idempotent notification, including when a retry finds
-  // an existing capture transaction. This repairs the crash window where the
-  // transaction was committed but the process stopped before notification creation.
-  // Notification.dedupeKey is unique, so replays do not create duplicate rows.
-  await createNotification({
-    userId: order.user,
-    type: 'payment_completed',
-    title: 'Payment confirmed',
-    message: `${order.productName} · ${order.currency} ${(amountCents / 100).toFixed(2)}.`,
-    orderId: order._id,
-    transactionId: transaction._id,
-    dedupeKey: `payment-completed:${capture.id}`,
+  // Durable outbox event closes the crash window between capture persistence
+  // and notification delivery. The event key is stable across webhook replays.
+  await enqueueOutboxEvent({
+    eventKey: `payment-completed:${capture.id}`,
+    eventType: 'payment_notification',
+    payload: {
+      userId: String(order.user),
+      organizationId: String(order.organization),
+      type: 'payment_completed',
+      title: 'Payment confirmed',
+      message: `${order.productName} · ${order.currency} ${(amountCents / 100).toFixed(2)}.`,
+      orderId: String(order._id),
+      transactionId: String(transaction._id),
+      dedupeKey: `payment-completed:${capture.id}`,
+    },
   });
-
   const currentStatus = updated.modifiedCount === 1
     ? 'paid'
     : await Order.findById(order._id).select('status').then((current) => current?.status);

@@ -79,7 +79,7 @@ export async function processOutboxBatch() {
         { _id: event._id, status: 'processing', processingToken: token },
         {
           $set: {
-            status: terminal ? 'failed' : 'pending',
+            status: terminal ? 'dead' : 'pending',
             availableAt: new Date(Date.now() + delayMs),
             processingToken: null,
             lastError: String(error.message).slice(0, 300),

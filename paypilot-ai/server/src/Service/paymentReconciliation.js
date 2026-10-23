@@ -14,7 +14,7 @@ const BATCH_SIZE = 25;
 
 let running = false;
 
-function completedCapture(paypalOrder) {
+export function completedCapture(paypalOrder) {
   const units = Array.isArray(paypalOrder?.purchase_units) ? paypalOrder.purchase_units : [];
   for (const unit of units) {
     const captures = unit?.payments?.captures;

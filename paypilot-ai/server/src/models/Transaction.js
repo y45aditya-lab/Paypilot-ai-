@@ -24,11 +24,15 @@ const transactionSchema = new mongoose.Schema(
     },
     refundId: { type: String, sparse: true },
     refundedAt: Date,
+    refundReconciliationAttempts: { type: Number, required: true, default: 0, min: 0 },
+    refundReconciliationLeaseUntil: { type: Date, index: true },
+    refundReconciliationLeaseToken: { type: String },
   },
   { timestamps: true },
 );
 
 transactionSchema.index({ user: 1, createdAt: -1 });
 transactionSchema.index({ organization: 1, createdAt: -1, status: 1 });
+transactionSchema.index({ status: 1, refundStatus: 1, updatedAt: 1 });
 
 export default mongoose.model('Transaction', transactionSchema);

@@ -383,6 +383,7 @@ router.post('/outbox/:id/retry', async (req, res, next) => {
       {
         _id: req.params.id,
         status: 'dead',
+        manualRetries: { $lt: 3 },
         'payload.organizationId': String(req.user.organizationId),
       },
       {
@@ -399,7 +400,15 @@ router.post('/outbox/:id/retry', async (req, res, next) => {
       { new: true },
     ).select('_id eventType status attempts manualRetries');
 
-    if (!event) return res.status(404).json({ error: 'Dead outbox event not found.' });
+    if (!event) {
+      const deadEvent = await OutboxEvent.exists({
+        _id: req.params.id,
+        status: 'dead',
+        'payload.organizationId': String(req.user.organizationId),
+      });
+      if (deadEvent) return res.status(409).json({ error: 'Manual retry limit reached for this event.' });
+      return res.status(404).json({ error: 'Dead outbox event not found.' });
+    }
 
     await audit('outbox.dead_event_retried', {
       userId: req.user.id,

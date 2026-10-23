@@ -2,16 +2,34 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import mongoose from 'mongoose';
 import WebhookEvent from '../src/models/WebhookEvent.js';
+import Notification from '../src/models/Notification.js';
 
 const uri = process.env.TEST_MONGODB_URI;
 
 test('MongoDB webhook event claims are unique and atomically reclaimable', { skip: !uri }, async (t) => {
   await mongoose.connect(uri);
-  await WebhookEvent.init(); // Ensure the unique eventId index exists before testing duplicate rejection.
+  await Promise.all([WebhookEvent.init(), Notification.init()]); // Wait for unique indexes before idempotency assertions.
   const prefix = `it-${process.pid}-${Date.now()}`;
   const eventId = `${prefix}-duplicate`;
   const reclaimId = `${prefix}-reclaim`;
+  const dedupeKey = `${prefix}-payment-completed`;
   try {
+    await t.test('payment notification dedupe keys prevent duplicate records on replay', async () => {
+      const notification = {
+        organization: new mongoose.Types.ObjectId(),
+        user: new mongoose.Types.ObjectId(),
+        type: 'payment_completed',
+        title: 'Payment confirmed',
+        message: 'Integration test payment',
+        dedupeKey,
+      };
+      await Notification.create(notification);
+      await assert.rejects(
+        Notification.create(notification),
+        (error) => error?.code === 11000,
+      );
+    });
+
     await t.test('duplicate event IDs are rejected by the unique index', async () => {
       await WebhookEvent.create({ eventId, status: 'processing', processingToken: 'owner-a' });
       await assert.rejects(
@@ -71,7 +89,10 @@ test('MongoDB webhook event claims are unique and atomically reclaimable', { ski
       await WebhookEvent.deleteOne({ eventId: staleId });
     });
   } finally {
-    await WebhookEvent.deleteMany({ eventId: { $in: [eventId, reclaimId] } });
+    await Promise.all([
+      WebhookEvent.deleteMany({ eventId: { $in: [eventId, reclaimId, `${prefix}-stale`] } }),
+      Notification.deleteMany({ dedupeKey }),
+    ]);
     await mongoose.disconnect();
   }
 });

@@ -3,16 +3,18 @@ import assert from 'node:assert/strict';
 import mongoose from 'mongoose';
 import WebhookEvent from '../src/models/WebhookEvent.js';
 import Notification from '../src/models/Notification.js';
+import Transaction from '../src/models/Transaction.js';
 
 const uri = process.env.TEST_MONGODB_URI;
 
 test('MongoDB webhook event claims are unique and atomically reclaimable', { skip: !uri }, async (t) => {
   await mongoose.connect(uri);
-  await Promise.all([WebhookEvent.init(), Notification.init()]); // Wait for unique indexes before idempotency assertions.
+  await Promise.all([WebhookEvent.init(), Notification.init(), Transaction.init()]); // Wait for unique indexes before idempotency assertions.
   const prefix = `it-${process.pid}-${Date.now()}`;
   const eventId = `${prefix}-duplicate`;
   const reclaimId = `${prefix}-reclaim`;
   const dedupeKey = `${prefix}-payment-completed`;
+  const captureId = `${prefix}-capture`;
   try {
     await t.test('payment notification dedupe keys prevent duplicate records on replay', async () => {
       const notification = {
@@ -28,6 +30,26 @@ test('MongoDB webhook event claims are unique and atomically reclaimable', { ski
         Notification.create(notification),
         (error) => error?.code === 11000,
       );
+    });
+
+    await t.test('PayPal capture IDs prevent duplicate transaction records', async () => {
+      const transaction = {
+        organization: new mongoose.Types.ObjectId(),
+        user: new mongoose.Types.ObjectId(),
+        order: new mongoose.Types.ObjectId(),
+        paypalOrderId: `${prefix}-paypal-order`,
+        paypalCaptureId: captureId,
+        productName: 'Integration test item',
+        amountCents: 4999,
+        currency: 'USD',
+        status: 'completed',
+      };
+      await Transaction.create(transaction);
+      await assert.rejects(
+        Transaction.create({ ...transaction, order: new mongoose.Types.ObjectId() }),
+        (error) => error?.code === 11000,
+      );
+      assert.equal(await Transaction.countDocuments({ paypalCaptureId: captureId }), 1);
     });
 
     await t.test('duplicate event IDs are rejected by the unique index', async () => {
@@ -92,6 +114,7 @@ test('MongoDB webhook event claims are unique and atomically reclaimable', { ski
     await Promise.all([
       WebhookEvent.deleteMany({ eventId: { $in: [eventId, reclaimId, `${prefix}-stale`] } }),
       Notification.deleteMany({ dedupeKey }),
+      Transaction.deleteMany({ paypalCaptureId: captureId }),
     ]);
     await mongoose.disconnect();
   }

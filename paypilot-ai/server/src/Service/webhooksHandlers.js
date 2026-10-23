@@ -89,22 +89,34 @@ async function onRefundCompleted(resource) {
     : payPalValueToCents(resource.amount.value);
   if (!Number.isSafeInteger(amountCents) || amountCents !== transaction.amountCents
     || resource.amount?.currency_code !== transaction.currency) {
-    await Transaction.updateOne({ _id: transaction._id }, { refundStatus: 'review_required' });
-    await audit('refund.amount_mismatch', {
-      userId: transaction.user,
-      orderId: transaction.order,
-      meta: { transactionId: String(transaction._id), refundId: resource.id },
-    });
-    await createNotification({
-      userId: transaction.user,
-      type: 'refund_review',
-      severity: 'high',
-      title: 'Refund needs review',
-      message: 'A PayPal refund did not match the original charge. Review the transaction before taking further action.',
-      orderId: transaction.order,
-      transactionId: transaction._id,
-      dedupeKey: `refund-review:${transaction._id}`,
-    });
+    const needsReview = await Transaction.findOneAndUpdate(
+      {
+        _id: transaction._id,
+        status: 'completed',
+        refundStatus: { $in: ['processing', 'pending'] },
+      },
+      { refundStatus: 'review_required' },
+      { new: true },
+    );
+    // A late or duplicate mismatched event must not downgrade a refund that has
+    // already reached a terminal state.
+    if (needsReview) {
+      await audit('refund.amount_mismatch', {
+        userId: needsReview.user,
+        orderId: needsReview.order,
+        meta: { transactionId: String(needsReview._id), refundId: resource.id },
+      });
+      await createNotification({
+        userId: needsReview.user,
+        type: 'refund_review',
+        severity: 'high',
+        title: 'Refund needs review',
+        message: 'A PayPal refund did not match the original charge. Review the transaction before taking further action.',
+        orderId: needsReview.order,
+        transactionId: needsReview._id,
+        dedupeKey: `refund-review:${needsReview._id}`,
+      });
+    }
     return 'processed';
   }
 

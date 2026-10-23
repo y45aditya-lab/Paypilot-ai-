@@ -55,16 +55,24 @@ async function onCaptureCompleted(cap) {
 async function onCaptureDenied(cap) {
   const order = await findOurOrder(cap);
   if (!order) return 'ignored';
-  await Order.updateOne({ _id: order._id, status: { $in: OPEN } }, { status: 'failed' });
-  await audit('webhook.capture_denied', { userId: order.user, orderId: order._id });
+  const failedOrder = await Order.findOneAndUpdate(
+    { _id: order._id, status: { $in: OPEN } },
+    { status: 'failed' },
+    { new: true },
+  );
+  // A late capture-denied event must not emit a failure notification after a
+  // successful capture or another terminal order transition.
+  if (!failedOrder) return 'ignored';
+
+  await audit('webhook.capture_denied', { userId: failedOrder.user, orderId: failedOrder._id });
   await createNotification({
-    userId: order.user,
+    userId: failedOrder.user,
     type: 'payment_failed',
     severity: 'medium',
     title: 'Payment was not completed',
-    message: `${order.productName} payment was declined or denied by PayPal.`,
-    orderId: order._id,
-    dedupeKey: `payment-denied:${order._id}`,
+    message: `${failedOrder.productName} payment was declined or denied by PayPal.`,
+    orderId: failedOrder._id,
+    dedupeKey: `payment-denied:${failedOrder._id}`,
   });
   return 'processed';
 }

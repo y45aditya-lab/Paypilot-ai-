@@ -88,6 +88,13 @@ test('outbox delivery persists one notification and recovers after a worker inte
       createdAt: new Date(Date.now() - 5 * 60 * 1000),
       updatedAt: new Date(Date.now() - 5 * 60 * 1000),
     });
+    // Explicitly age the lease after insert; Mongoose timestamps can replace
+    // caller-provided updatedAt during document creation.
+    await OutboxEvent.updateOne(
+      { eventKey: recoveryKey },
+      { $set: { updatedAt: new Date(Date.now() - 5 * 60 * 1000) } },
+      { timestamps: false },
+    );
 
     await processOutboxBatch();
     const recoveredEvent = await OutboxEvent.findOne({ eventKey: recoveryKey }).lean();

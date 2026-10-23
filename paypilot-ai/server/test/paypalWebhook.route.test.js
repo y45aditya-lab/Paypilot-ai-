@@ -62,17 +62,15 @@ test('acknowledges already processed duplicate event ids without running the han
   const router = createPayPalWebhookRouter({
     WebhookEventModel: fakeModel({
       create: async () => { throw duplicateError; },
-      findOne: async () => ({ status: 'processed', eventId: 'WH-123', lean: undefined }),
+      findOne: () => ({ lean: async () => ({ status: 'processed', eventId: 'WH-123' }) }),
     }),
     verifySignature: async () => true,
     eventHandler: async () => { handled += 1; return 'processed'; },
   });
-  // Mongoose query supports .lean(); emulate the query shape used by the route.
-  const model = router;
-  void model;
   await withServer(router, async (url) => {
     const response = await fetch(url, { method: 'POST', headers, body: payload() });
-    assert.equal(response.status, 500, 'the fake must provide the lean() query method');
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { duplicate: true });
     assert.equal(handled, 0);
   });
 });

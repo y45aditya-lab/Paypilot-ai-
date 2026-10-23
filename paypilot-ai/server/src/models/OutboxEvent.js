@@ -4,7 +4,7 @@ const outboxEventSchema = new mongoose.Schema({
   eventKey: { type: String, required: true, unique: true },
   eventType: { type: String, required: true },
   payload: { type: mongoose.Schema.Types.Mixed, required: true },
-  status: { type: String, enum: ['pending', 'processing', 'processed', 'failed'], default: 'pending', index: true },
+  status: { type: String, enum: ['pending', 'processing', 'processed', 'failed', 'dead'], default: 'pending', index: true },
   attempts: { type: Number, default: 0 },
   availableAt: { type: Date, default: Date.now, index: true },
   processingToken: { type: String, default: null },

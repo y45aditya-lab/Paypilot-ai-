@@ -7,6 +7,7 @@ const uri = process.env.TEST_MONGODB_URI;
 
 test('MongoDB webhook event claims are unique and atomically reclaimable', { skip: !uri }, async (t) => {
   await mongoose.connect(uri);
+  await WebhookEvent.init(); // Ensure the unique eventId index exists before testing duplicate rejection.
   const prefix = `it-${process.pid}-${Date.now()}`;
   const eventId = `${prefix}-duplicate`;
   const reclaimId = `${prefix}-reclaim`;
